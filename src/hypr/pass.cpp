@@ -1,57 +1,53 @@
 #include "pass.hpp"
-#include <hyprland/src/render/OpenGL.hpp>
-#include <hyprland/src/render/pass/RectPassElement.hpp>
+#include "globals.hpp"
+#include "../gl/renderer.hpp"
 #include <hyprland/src/event/EventBus.hpp>
 
 namespace hypr {
-namespace {
-
-// renderTextureInternal is private, and CTexPassElement (the public pass-element route to
-// it) is built around window surfaces and does not display a bare, surface-less capture
-// correctly. Borrowing the member directly, the way it is meant to be called, sidesteps
-// that: see the comment on the identical trick in capture.cpp for why this is safe.
-template <typename Tag, typename Tag::type Member> struct Steal {
-    friend typename Tag::type stolen(Tag) {
-        return Member;
-    }
-};
-
-struct RenderTextureInternalTag {
-    using type = void (Render::GL::CHyprOpenGLImpl::*)(SP<Render::ITexture>, const CBox&, const Render::GL::CHyprOpenGLImpl::STextureRenderData&);
-    friend type stolen(RenderTextureInternalTag);
-};
-template struct Steal<RenderTextureInternalTag, &Render::GL::CHyprOpenGLImpl::renderTextureInternal>;
-
-}
 
 // Owned by plugin.cpp; declared here to keep the pass element free of plugin state.
 extern FaceTexture g_incoming;
 extern PHLMONITOR  g_monitor;
 
 static CHyprSignalListener g_stageListener;
+static gl::CubeRenderer    g_renderer;
+static bool                g_rendererReady = false;
+// A compile/link failure is deterministic for fixed shader source: retrying init() every
+// frame would leak nothing (init() now cleans up after itself) but would notify forever.
+// Try exactly once per plugin load.
+static bool                g_rendererFailed = false;
 
 std::vector<UP<IPassElement>> CubePassElement::draw() {
     if (!g_monitor)
         return {};
 
-    const CBox box = {0.0, 0.0, g_monitor->m_pixelSize.x, g_monitor->m_pixelSize.y};
-
-    // captureWorkspace returns no texture for a workspace that doesn't exist or lives on
-    // another monitor; draw its background (black) instead of leaving the real desktop
-    // showing through, so a swipe past the last workspace reads as "nothing here", not
-    // as the gesture having no effect.
-    if (!g_incoming.valid()) {
-        std::vector<UP<IPassElement>> out;
-        out.emplace_back(makeUnique<CRectPassElement>(CRectPassElement::SRectData{.box = box, .color = CHyprColor{0.f, 0.f, 0.f, 1.f}}));
-        return out;
+    if (!g_rendererReady) {
+        if (g_rendererFailed)
+            return {};
+        g_rendererReady = g_renderer.init();
+        if (!g_rendererReady) {
+            g_rendererFailed = true;
+            HyprlandAPI::addNotification(PHANDLE,
+                std::string("[hypr-cube] GL init failed: ") + g_renderer.lastError(),
+                CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
+            return {};
+        }
     }
 
-    const CRegion& damage = g_pHyprRenderer->renderData().damage;
+    // No capture yet (or it fell off the edge of the workspace list): clear to the
+    // background colour instead of leaving the real desktop showing through, so a
+    // swipe past the last workspace reads as "nothing here", not as a no-op.
+    std::vector<gl::CubeRenderer::Quad> quads;
+    if (g_incoming.valid()) {
+        // Flat identity draw: unit quad scaled to fill NDC exactly.
+        cube::Mat4 mvp = cube::identity();
+        mvp.m[0] = 2.f;   // unit quad spans -0.5..0.5, so scale by 2 to fill -1..1
+        mvp.m[5] = 2.f;
+        quads.push_back({(unsigned int)g_incoming.tex->m_texID, mvp, 0.f});
+    }
 
-    Render::GL::CHyprOpenGLImpl::STextureRenderData data;
-    data.damage = &damage;
-    data.a      = 1.f;
-    (Render::GL::g_pHyprOpenGL.get()->*stolen(RenderTextureInternalTag{}))(g_incoming.tex, box, data);
+    const float bg[4] = {0.f, 0.f, 0.f, 1.f};
+    g_renderer.draw(std::move(quads), bg, (int)g_monitor->m_pixelSize.x, (int)g_monitor->m_pixelSize.y);
     return {};
 }
 
@@ -68,6 +64,10 @@ void startFrameLoop(PHLMONITOR mon) {
 void stopFrameLoop() {
     g_stageListener.reset();
     g_pHyprRenderer->m_renderPass.removeAllOfType("CubePassElement");
+    if (g_rendererReady) {
+        g_renderer.destroy();
+        g_rendererReady = false;
+    }
     g_monitor = nullptr;
 }
 
