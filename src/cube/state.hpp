@@ -43,7 +43,6 @@ class CubeState {
     void addDragDelta(float dxPixels);
     void release(double nowMs);
     void abort(double nowMs);
-    int  nearestFace() const;   // normalized front face; NOT release()'s snap target, see state.cpp
 
     Phase phase() const { return m_phase; }
     bool  active() const { return m_phase != Phase::Idle; }

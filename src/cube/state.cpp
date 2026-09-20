@@ -120,10 +120,6 @@ void CubeState::abort(double nowMs) {
     m_suppressCommit = true;
 }
 
-int CubeState::nearestFace() const {
-    return frontFace();
-}
-
 Frame CubeState::update(double nowMs) {
     const double t = m_durationMs > 0.0 ? (nowMs - m_startMs) / m_durationMs : 1.0;
     const float  e = easeOutCubic(static_cast<float>(t));
