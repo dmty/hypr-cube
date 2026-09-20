@@ -81,10 +81,14 @@ Mat4 faceMvp(const Geometry& g, int face, float angle, float zoom) {
     const float step  = 2.f * PI / static_cast<float>(g.faces);
     const Mat4  model = multiply(rotateY(angle + static_cast<float>(face) * step),
                                  translate(0.f, 0.f, g.apothem));
-    const Mat4  view  = translate(0.f, 0.f, -g.cameraDist / zoom);
-    // near must stay well inside cameraDist - apothem; far must clear the back faces.
+    const float eye   = g.cameraDist / zoom;
+    const Mat4  view  = translate(0.f, 0.f, -eye);
+    // near must stay well inside cameraDist - apothem; far must track the eye (a fixed
+    // multiple of cameraDist clips the whole prism away once zoom shrinks the eye distance).
+    // The 3x apothem margin is load-bearing: at faces==3 the circumradius is exactly
+    // 2x apothem, so anything less sits on the clip boundary.
     const Mat4  proj  = perspective(g.fovYRad, g.width / g.height,
-                                    g.cameraDist * 0.01f, g.cameraDist * 4.f);
+                                    g.cameraDist * 0.01f, eye + 3.f * g.apothem);
     return multiply(proj, multiply(view, model));
 }
 

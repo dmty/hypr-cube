@@ -110,7 +110,13 @@ void CubeState::abort(double nowMs) {
     if (m_phase != Phase::Dragging)
         return;
     release(nowMs);
-    m_toAngle        = -static_cast<float>(m_originFace) * step();
+    // Congruent target nearest the current angle, not the canonical -originFace*step:
+    // after a multi-turn free spin the canonical target would unwind the whole spin
+    // backwards inside one duration_ms. Which target is chosen never changes the
+    // landing face, only how far the ease travels to get there.
+    const float turn = 2.f * PI;
+    m_toAngle = -static_cast<float>(m_originFace) * step()
+              - static_cast<float>(std::lround((-m_angle - m_originFace * step()) / turn)) * turn;
     m_suppressCommit = true;
 }
 

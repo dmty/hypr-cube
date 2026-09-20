@@ -5,8 +5,8 @@
 
 using namespace cube;
 
-static const float PI      = 3.14159265359f;
-static const float HALF_PI = PI / 2.f;
+static constexpr float PI      = 3.14159265359f;
+static constexpr float HALF_PI = PI / 2.f;
 
 static void expectMat(const Mat4& got, const Mat4& want, const char* what) {
     for (int i = 0; i < 16; ++i) {
@@ -295,10 +295,13 @@ static void testFreeSpinAcrossManyTurnsStillLandsOnACorrectFace() {
     s.update(300.0);
     s.addDragDelta(-500.f * 9.f);           // nine faces: two full turns plus one
     s.release(300.0);
-    s.update(600.0);
+    const Frame f = s.update(600.0);
     const int landed = s.takeCommit();
     assert(landed >= 0 && landed < 4);
     assert(landed == 1);
+    // release() snaps to the raw lround target, not the nearestFace()-normalized one:
+    // normalizing here would unwind the spin instead of landing where the drag pointed.
+    assert(f.angle == -9.f * s.step());
 }
 
 static void testAbortReturnsToTheOriginFaceAndCommitsNothing() {
@@ -312,6 +315,19 @@ static void testAbortReturnsToTheOriginFaceAndCommitsNothing() {
     assert(f.zoom == 1.f);
     assert(s.phase() == Phase::Idle);
     assert(s.takeCommit() == -1);           // no workspace change
+}
+
+static void testMinimumDragZoomKeepsTheCubeInsideTheFarPlane() {
+    // At the bottom of the legal drag_zoom range the eye moves back; the far plane
+    // must track it or the whole prism clips away. Checked at every legal (faces, fov).
+    for (int n = 3; n <= 16; ++n)
+        for (float fovDeg = 20.f; fovDeg <= 120.f; fovDeg += 10.f) {
+            const Geometry g = makeGeometry(n, 1920.f, 1080.f, fovDeg * PI / 180.f);
+            for (int corner = 0; corner < 4; ++corner) {
+                assert(projectFaceCorner(g, 0, 0.f, 0.2f, corner).z <= 1.f);
+                assert(projectFaceCorner(g, n / 2, 0.f, 0.2f, corner).z <= 1.f);
+            }
+        }
 }
 
 static void testDragIsRefusedWhileRotating() {
@@ -357,6 +373,7 @@ int main() {
     testExactHalfwaySnapIsDeterministic();
     testFreeSpinAcrossManyTurnsStillLandsOnACorrectFace();
     testAbortReturnsToTheOriginFaceAndCommitsNothing();
+    testMinimumDragZoomKeepsTheCubeInsideTheFarPlane();
     testDragIsRefusedWhileRotating();
     std::printf("all tests passed\n");
     return 0;

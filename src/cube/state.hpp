@@ -19,7 +19,7 @@ struct Clamped {
 
 Clamped validate(Config raw);
 
-int faceOfWorkspace(int workspaceId, int faces);
+int faceOfWorkspace(int workspaceId, int faces);   // -1 if workspaceId is not a face
 int workspaceOfFace(int face);
 int normalizeFace(int face, int faces);
 
@@ -43,12 +43,12 @@ class CubeState {
     void addDragDelta(float dxPixels);
     void release(double nowMs);
     void abort(double nowMs);
-    int  nearestFace() const;
+    int  nearestFace() const;   // normalized front face; NOT release()'s snap target, see state.cpp
 
     Phase phase() const { return m_phase; }
     bool  active() const { return m_phase != Phase::Idle; }
     int   frontFace() const;
-    int   takeCommit();
+    int   takeCommit();   // -1 if nothing to commit
 
     float step() const;
 
