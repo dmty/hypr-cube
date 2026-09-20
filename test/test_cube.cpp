@@ -1,4 +1,5 @@
 #include "../src/cube/math.hpp"
+#include "../src/cube/state.hpp"
 #include <cassert>
 #include <cstdio>
 
@@ -98,6 +99,65 @@ static void testRotatingOneStepBringsTheNextFaceToRest() {
     assert(approxEq(tr.x, 1.f) && approxEq(tr.y, 1.f));
 }
 
+static void testDefaultConfigSurvivesValidation() {
+    const Clamped c = validate(Config{});
+    assert(c.config.faces == 4 && c.config.durationMs == 300);
+    assert(!c.facesClamped && !c.fovClamped && !c.dragZoomClamped);
+}
+
+static void testFacesClampToLegalRange() {
+    Config low{};  low.faces  = 1;
+    Config high{}; high.faces = 99;
+    const Clamped a = validate(low), b = validate(high);
+    assert(a.config.faces == 3  && a.facesClamped);
+    assert(b.config.faces == 16 && b.facesClamped);
+}
+
+static void testTwoFacesIsRejectedAsDegenerate() {
+    Config c{}; c.faces = 2;
+    const Clamped v = validate(c);
+    assert(v.config.faces == 3 && v.facesClamped);
+}
+
+static void testFovClampsToLegalRange() {
+    Config lo{}; lo.fovDeg = 1.f;
+    Config hi{}; hi.fovDeg = 179.f;
+    const Clamped a = validate(lo), b = validate(hi);
+    assert(approxEq(a.config.fovDeg, 20.f)  && a.fovClamped);
+    assert(approxEq(b.config.fovDeg, 120.f) && b.fovClamped);
+}
+
+static void testDragZoomClampsToUsableRange() {
+    Config lo{}; lo.dragZoom = 0.f;
+    Config hi{}; hi.dragZoom = 5.f;
+    const Clamped a = validate(lo), b = validate(hi);
+    assert(approxEq(a.config.dragZoom, 0.2f) && a.dragZoomClamped);
+    assert(approxEq(b.config.dragZoom, 1.f)  && b.dragZoomClamped);
+}
+
+static void testDurationClampsToAtLeastOneFrame() {
+    Config c{}; c.durationMs = 0;
+    assert(validate(c).config.durationMs >= 16);
+}
+
+static void testWorkspaceToFaceMapping() {
+    assert(faceOfWorkspace(1, 4) == 0);
+    assert(faceOfWorkspace(4, 4) == 3);
+    assert(faceOfWorkspace(5, 4) == -1);   // above N: not a face
+    assert(faceOfWorkspace(0, 4) == -1);   // special workspaces are negative or zero
+    assert(faceOfWorkspace(-99, 4) == -1);
+    assert(workspaceOfFace(0) == 1);
+    assert(workspaceOfFace(3) == 4);
+}
+
+static void testNormalizeFaceWrapsBothDirections() {
+    assert(normalizeFace(0, 4) == 0);
+    assert(normalizeFace(4, 4) == 0);
+    assert(normalizeFace(-1, 4) == 3);
+    assert(normalizeFace(-5, 4) == 3);
+    assert(normalizeFace(9, 4) == 1);
+}
+
 int main() {
     testIdentityIsMultiplicativeUnit();
     testTranslateMovesAPoint();
@@ -110,6 +170,14 @@ int main() {
     testRestingInvariantHoldsAtEveryLegalFaceCountAndFov();
     testZoomOutShrinksTheFace();
     testRotatingOneStepBringsTheNextFaceToRest();
+    testDefaultConfigSurvivesValidation();
+    testFacesClampToLegalRange();
+    testTwoFacesIsRejectedAsDegenerate();
+    testFovClampsToLegalRange();
+    testDragZoomClampsToUsableRange();
+    testDurationClampsToAtLeastOneFrame();
+    testWorkspaceToFaceMapping();
+    testNormalizeFaceWrapsBothDirections();
     std::printf("all tests passed\n");
     return 0;
 }
