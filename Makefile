@@ -7,7 +7,7 @@ endif
 
 all:
 	$(CXX) $(CXXFLAGS) $(PLUGIN_FLAGS) $(EXTRA_FLAGS) \
-	  src/cube/*.cpp src/gl/*.cpp src/hypr/*.cpp \
+	  $(wildcard src/cube/*.cpp src/gl/*.cpp src/hypr/*.cpp) \
 	  -o hypr-cube.so `pkg-config --cflags $(PKGS)`
 
 test:

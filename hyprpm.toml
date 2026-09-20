@@ -1,0 +1,11 @@
+[repository]
+name = "hypr-cube"
+authors = ["dmitry"]
+commit_pins = [
+    ["efb50993780079460b0cbed1363e2166a2de1d9f", "HEAD"],
+]
+
+[hypr-cube]
+description = "Compiz-style cube workspace switching"
+output = "hypr-cube.so"
+build = ["make all"]
