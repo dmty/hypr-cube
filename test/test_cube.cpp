@@ -158,6 +158,80 @@ static void testNormalizeFaceWrapsBothDirections() {
     assert(normalizeFace(9, 4) == 1);
 }
 
+static void testEasingEndpointsAreExact() {
+    assert(easeOutCubic(0.f) == 0.f);
+    assert(easeOutCubic(1.f) == 1.f);
+}
+
+static void testEasingIsMonotonicAndFrontLoaded() {
+    float prev = -1.f;
+    for (int i = 0; i <= 10; ++i) {
+        const float t = static_cast<float>(i) / 10.f;
+        const float e = easeOutCubic(t);
+        assert(e > prev);
+        prev = e;
+    }
+    assert(easeOutCubic(0.5f) > 0.5f);   // ease-out covers most ground early
+}
+
+static void testRotateStartsAtTheOriginFaceAngle() {
+    CubeState s(validate(Config{}).config);
+    assert(s.startRotate(0, 1, 1000.0));
+    const Frame f = s.update(1000.0);
+    assert(approxEq(f.angle, 0.f));
+    assert(approxEq(f.zoom, 1.f));
+}
+
+static void testRotateEndsExactlyOnTheTargetAngle() {
+    const float step = 2.f * PI / 4.f;
+    CubeState s(validate(Config{}).config);
+    s.startRotate(0, 1, 1000.0);
+    const Frame f = s.update(1000.0 + 300.0);
+    assert(f.angle == -step);            // exact, not approximate
+    assert(s.phase() == Phase::Idle);
+}
+
+static void testRotatePastTheEndDoesNotOvershoot() {
+    const float step = 2.f * PI / 4.f;
+    CubeState s(validate(Config{}).config);
+    s.startRotate(0, 1, 1000.0);
+    const Frame f = s.update(1000.0 + 99999.0);
+    assert(f.angle == -step);
+}
+
+static void testPrevFromFaceZeroTakesOneStepNotThree() {
+    const float step = 2.f * PI / 4.f;
+    CubeState s(validate(Config{}).config);
+    s.startRotate(0, -1, 0.0);
+    const Frame f = s.update(300.0);
+    assert(f.angle == step);             // one step forward, not -3 steps
+    assert(s.frontFace() == 3);
+}
+
+static void testRotationCommitsTheTargetFaceExactlyOnce() {
+    CubeState s(validate(Config{}).config);
+    s.startRotate(0, 1, 0.0);
+    assert(s.takeCommit() == -1);        // nothing to commit mid-flight
+    s.update(300.0);
+    assert(s.takeCommit() == 1);
+    assert(s.takeCommit() == -1);        // already taken
+}
+
+static void testRotateIsIgnoredWhileAlreadyAnimating() {
+    CubeState s(validate(Config{}).config);
+    assert(s.startRotate(0, 1, 0.0));
+    assert(!s.startRotate(1, 1, 100.0));  // dropped, not queued
+    s.update(300.0);
+    assert(s.takeCommit() == 1);
+}
+
+static void testIdleStateIsInactiveAndSquare() {
+    CubeState s(validate(Config{}).config);
+    assert(!s.active());
+    const Frame f = s.update(12345.0);
+    assert(approxEq(f.angle, 0.f) && approxEq(f.zoom, 1.f));
+}
+
 int main() {
     testIdentityIsMultiplicativeUnit();
     testTranslateMovesAPoint();
@@ -178,6 +252,15 @@ int main() {
     testDurationClampsToAtLeastOneFrame();
     testWorkspaceToFaceMapping();
     testNormalizeFaceWrapsBothDirections();
+    testEasingEndpointsAreExact();
+    testEasingIsMonotonicAndFrontLoaded();
+    testRotateStartsAtTheOriginFaceAngle();
+    testRotateEndsExactlyOnTheTargetAngle();
+    testRotatePastTheEndDoesNotOvershoot();
+    testPrevFromFaceZeroTakesOneStepNotThree();
+    testRotationCommitsTheTargetFaceExactlyOnce();
+    testRotateIsIgnoredWhileAlreadyAnimating();
+    testIdleStateIsInactiveAndSquare();
     std::printf("all tests passed\n");
     return 0;
 }

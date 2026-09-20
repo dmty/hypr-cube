@@ -23,4 +23,39 @@ int faceOfWorkspace(int workspaceId, int faces);
 int workspaceOfFace(int face);
 int normalizeFace(int face, int faces);
 
+enum class Phase { Idle, Rotating, Dragging, Settling };
+
+struct Frame {
+    float angle;
+    float zoom;
+};
+
+float easeOutCubic(float t);
+
+class CubeState {
+  public:
+    explicit CubeState(Config validated);
+
+    bool  startRotate(int fromFace, int dir, double nowMs);
+    Frame update(double nowMs);
+
+    Phase phase() const { return m_phase; }
+    bool  active() const { return m_phase != Phase::Idle; }
+    int   frontFace() const;
+    int   takeCommit();
+
+    float step() const;
+
+  private:
+    Config m_cfg;
+    Phase  m_phase      = Phase::Idle;
+    float  m_angle      = 0.f;
+    float  m_zoom       = 1.f;
+    float  m_fromAngle  = 0.f;
+    float  m_toAngle    = 0.f;
+    double m_startMs    = 0.0;
+    double m_durationMs = 0.0;
+    int    m_commit     = -1;
+};
+
 }
