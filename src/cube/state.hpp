@@ -39,6 +39,12 @@ class CubeState {
     bool  startRotate(int fromFace, int dir, double nowMs);
     Frame update(double nowMs);
 
+    bool startDrag(int fromFace, double nowMs);
+    void addDragDelta(float dxPixels);
+    void release(double nowMs);
+    void abort(double nowMs);
+    int  nearestFace() const;
+
     Phase phase() const { return m_phase; }
     bool  active() const { return m_phase != Phase::Idle; }
     int   frontFace() const;
@@ -56,6 +62,11 @@ class CubeState {
     double m_startMs    = 0.0;
     double m_durationMs = 0.0;
     int    m_commit     = -1;
+
+    float m_fromZoom       = 1.f;
+    float m_toZoom         = 1.f;
+    int   m_originFace     = 0;
+    bool  m_suppressCommit = false;
 };
 
 }

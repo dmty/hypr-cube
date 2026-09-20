@@ -232,6 +232,94 @@ static void testIdleStateIsInactiveAndSquare() {
     assert(approxEq(f.angle, 0.f) && approxEq(f.zoom, 1.f));
 }
 
+static void testDragZoomsOutAndReachesTheConfiguredZoomExactly() {
+    CubeState s(validate(Config{}).config);
+    assert(s.startDrag(0, 0.0));
+    assert(approxEq(s.update(0.0).zoom, 1.f));
+    const Frame f = s.update(300.0);
+    assert(f.zoom == 0.6f);
+    assert(s.phase() == Phase::Dragging);   // stays dragging; zoom just finished easing
+}
+
+static void testDragDeltaTurnsTheCube() {
+    CubeState s(validate(Config{}).config);
+    s.startDrag(0, 0.0);
+    s.update(300.0);
+    s.addDragDelta(500.f);                  // one face worth at sensitivity 1.0
+    assert(approxEq(s.update(400.0).angle, s.step()));
+}
+
+static void testDragDeltaIsIgnoredWhenNotDragging() {
+    CubeState s(validate(Config{}).config);
+    s.addDragDelta(500.f);
+    assert(approxEq(s.update(0.0).angle, 0.f));
+}
+
+static void testReleaseSnapsToTheNearerFace() {
+    CubeState s(validate(Config{}).config);
+    s.startDrag(0, 0.0);
+    s.update(300.0);
+    s.addDragDelta(-300.f);                 // 0.6 of a step toward face 1
+    s.release(300.0);
+    const Frame f = s.update(600.0);
+    assert(f.angle == -s.step());
+    assert(f.zoom == 1.f);
+    assert(s.phase() == Phase::Idle);
+    assert(s.takeCommit() == 1);
+}
+
+static void testReleaseSnapsBackWhenUnderHalfway() {
+    CubeState s(validate(Config{}).config);
+    s.startDrag(0, 0.0);
+    s.update(300.0);
+    s.addDragDelta(-200.f);                 // 0.4 of a step: not far enough
+    s.release(300.0);
+    s.update(600.0);
+    assert(s.takeCommit() == 0);
+}
+
+static void testExactHalfwaySnapIsDeterministic() {
+    CubeState s(validate(Config{}).config);
+    s.startDrag(0, 0.0);
+    s.update(300.0);
+    s.addDragDelta(-250.f);                 // exactly half a step
+    s.release(300.0);
+    s.update(600.0);
+    // lround rounds half away from zero, so a half-step lands on the new face.
+    assert(s.takeCommit() == 1);
+}
+
+static void testFreeSpinAcrossManyTurnsStillLandsOnACorrectFace() {
+    CubeState s(validate(Config{}).config);
+    s.startDrag(0, 0.0);
+    s.update(300.0);
+    s.addDragDelta(-500.f * 9.f);           // nine faces: two full turns plus one
+    s.release(300.0);
+    s.update(600.0);
+    const int landed = s.takeCommit();
+    assert(landed >= 0 && landed < 4);
+    assert(landed == 1);
+}
+
+static void testAbortReturnsToTheOriginFaceAndCommitsNothing() {
+    CubeState s(validate(Config{}).config);
+    s.startDrag(2, 0.0);
+    s.update(300.0);
+    s.addDragDelta(-700.f);                 // wandered well past face 3
+    s.abort(300.0);
+    const Frame f = s.update(600.0);
+    assert(f.angle == -2.f * s.step());     // back where it started
+    assert(f.zoom == 1.f);
+    assert(s.phase() == Phase::Idle);
+    assert(s.takeCommit() == -1);           // no workspace change
+}
+
+static void testDragIsRefusedWhileRotating() {
+    CubeState s(validate(Config{}).config);
+    s.startRotate(0, 1, 0.0);
+    assert(!s.startDrag(0, 100.0));
+}
+
 int main() {
     testIdentityIsMultiplicativeUnit();
     testTranslateMovesAPoint();
@@ -261,6 +349,15 @@ int main() {
     testRotationCommitsTheTargetFaceExactlyOnce();
     testRotateIsIgnoredWhileAlreadyAnimating();
     testIdleStateIsInactiveAndSquare();
+    testDragZoomsOutAndReachesTheConfiguredZoomExactly();
+    testDragDeltaTurnsTheCube();
+    testDragDeltaIsIgnoredWhenNotDragging();
+    testReleaseSnapsToTheNearerFace();
+    testReleaseSnapsBackWhenUnderHalfway();
+    testExactHalfwaySnapIsDeterministic();
+    testFreeSpinAcrossManyTurnsStillLandsOnACorrectFace();
+    testAbortReturnsToTheOriginFaceAndCommitsNothing();
+    testDragIsRefusedWhileRotating();
     std::printf("all tests passed\n");
     return 0;
 }

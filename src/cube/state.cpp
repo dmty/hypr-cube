@@ -14,6 +14,8 @@ bool clampTo(T& v, T lo, T hi) {
 
 constexpr float PI = 3.14159265358979323846f;
 
+constexpr float DRAG_REFERENCE_PX = 500.f;   // px for one face at sensitivity 1.0
+
 }
 
 Clamped validate(Config raw) {
@@ -72,18 +74,85 @@ bool CubeState::startRotate(int fromFace, int dir, double nowMs) {
     return true;
 }
 
+bool CubeState::startDrag(int fromFace, double nowMs) {
+    if (m_phase != Phase::Idle)
+        return false;
+    m_originFace     = fromFace;
+    m_angle          = -static_cast<float>(fromFace) * step();
+    m_fromZoom       = 1.f;
+    m_toZoom         = m_cfg.dragZoom;
+    m_startMs        = nowMs;
+    m_durationMs     = static_cast<double>(m_cfg.durationMs);
+    m_suppressCommit = false;
+    m_phase          = Phase::Dragging;
+    return true;
+}
+
+void CubeState::addDragDelta(float dxPixels) {
+    if (m_phase != Phase::Dragging)
+        return;
+    m_angle += dxPixels * m_cfg.dragSensitivity * (step() / DRAG_REFERENCE_PX);
+}
+
+void CubeState::release(double nowMs) {
+    if (m_phase != Phase::Dragging)
+        return;
+    m_fromAngle  = m_angle;
+    m_toAngle    = -static_cast<float>(std::lround(-m_angle / step())) * step();
+    m_fromZoom   = m_zoom;
+    m_toZoom     = 1.f;
+    m_startMs    = nowMs;
+    m_durationMs = static_cast<double>(m_cfg.durationMs);
+    m_phase      = Phase::Settling;
+}
+
+void CubeState::abort(double nowMs) {
+    if (m_phase != Phase::Dragging)
+        return;
+    release(nowMs);
+    m_toAngle        = -static_cast<float>(m_originFace) * step();
+    m_suppressCommit = true;
+}
+
+int CubeState::nearestFace() const {
+    return frontFace();
+}
+
 Frame CubeState::update(double nowMs) {
-    if (m_phase == Phase::Rotating) {
-        const double t = (nowMs - m_startMs) / m_durationMs;
-        if (t >= 1.0) {
-            m_angle  = m_toAngle;            // assigned, never lerped, so it is exact
-            m_phase  = Phase::Idle;
-            m_commit = frontFace();
-        } else {
-            const float e = easeOutCubic(static_cast<float>(t));
-            m_angle = m_fromAngle + (m_toAngle - m_fromAngle) * e;
-        }
-        m_zoom = 1.f;
+    const double t = m_durationMs > 0.0 ? (nowMs - m_startMs) / m_durationMs : 1.0;
+    const float  e = easeOutCubic(static_cast<float>(t));
+
+    switch (m_phase) {
+        case Phase::Idle: break;
+
+        case Phase::Rotating:
+            if (t >= 1.0) {
+                m_angle  = m_toAngle;         // assigned, never lerped, so it is exact
+                m_zoom   = 1.f;
+                m_phase  = Phase::Idle;
+                m_commit = frontFace();
+            } else {
+                m_angle = m_fromAngle + (m_toAngle - m_fromAngle) * e;
+                m_zoom  = 1.f;
+            }
+            break;
+
+        case Phase::Dragging:
+            // Angle is driven by addDragDelta; only zoom is time-based here.
+            m_zoom = t >= 1.0 ? m_toZoom : m_fromZoom + (m_toZoom - m_fromZoom) * e;
+            break;
+
+        case Phase::Settling:
+            if (t >= 1.0) {
+                m_angle  = m_toAngle;
+                m_zoom   = m_toZoom;
+                m_phase  = Phase::Idle;
+                m_commit = m_suppressCommit ? -1 : frontFace();
+            } else {
+                m_angle = m_fromAngle + (m_toAngle - m_fromAngle) * e;
+                m_zoom  = m_fromZoom + (m_toZoom - m_fromZoom) * e;
+            }
+            break;
     }
     return {m_angle, m_zoom};
 }
