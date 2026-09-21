@@ -12,6 +12,10 @@ which silently does nothing on non-x86_64 systems (the hooking library only supp
 x86_64). Because this plugin uses no function hooks, it works the same way on aarch64 as
 on x86_64.
 
+## Demo
+
+https://github.com/user-attachments/assets/76c6a585-341c-4b29-b4ed-76ed199aa051
+
 ## Supported Hyprland version
 
 Built and tested against **Hyprland v0.56.2, commit
@@ -24,7 +28,7 @@ hash it was built against.
 
 ```sh
 hyprpm update
-hyprpm add <this-repository-url-or-path> <commit-hash>
+hyprpm add https://github.com/dmty/hypr-cube <commit-hash>
 hyprpm enable hypr-cube
 hyprpm reload
 ```
