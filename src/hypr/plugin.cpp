@@ -8,18 +8,111 @@
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
+#include <hyprland/src/config/ConfigManager.hpp>
+#include <hyprland/src/config/values/types/IntValue.hpp>
+#include <hyprland/src/config/values/types/FloatValue.hpp>
+#include <hyprland/src/config/values/types/ColorValue.hpp>
+#include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <stdexcept>
 #include <vector>
 
 namespace hypr {
 
-// Populated in a later task; defaults describe a 4-face cube until then.
 cube::Config g_cfg;
 float        g_background[4] = {0.f, 0.f, 0.f, 1.f};
+
+namespace {
+using namespace Config::Values;
+
+// One spelling per config key, shared by registration and read-back. A key registered
+// under one string and read under another silently reads its compiled default forever,
+// which is invisible until someone notices the setting does nothing.
+constexpr const char* N_FACES      = "plugin:hypr-cube:faces";
+constexpr const char* N_DURATION   = "plugin:hypr-cube:duration_ms";
+constexpr const char* N_FOV        = "plugin:hypr-cube:fov";
+constexpr const char* N_DRAG_ZOOM  = "plugin:hypr-cube:drag_zoom";
+constexpr const char* N_DRAG_SENS  = "plugin:hypr-cube:drag_sensitivity";
+constexpr const char* N_BACKGROUND = "plugin:hypr-cube:background";
+
+constexpr Config::INTEGER D_FACES = 4, D_DURATION = 300, D_BACKGROUND = 0xFF000000;
+constexpr Config::FLOAT   D_FOV = 45.f, D_DRAG_ZOOM = 0.6f, D_DRAG_SENS = 1.f;
+
+void registerOne(SP<IValue> value) {
+    const auto res = Config::mgr()->registerPluginValue(PHANDLE, value);
+    if (!res)
+        HyprlandAPI::addNotification(PHANDLE,
+            "[hypr-cube] failed to register " + std::string(value->name()) + ": " + res.error(),
+            CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
+}
+
+// registerPluginValue (Lua config manager) converts the IValue we hand it into an
+// independent Config::Lua::ILuaConfigValue that holds the live, hot-reloadable data;
+// our own IValue is discarded once the call returns, and its own value() always reads
+// back its compiled default (verified on-device: a value read via the handle stayed at
+// its default while `hyprctl repl "print(hl.get_config(...))"` showed the live edited
+// number). So values are read back the same generic way Hyprland itself reads plugin
+// values, via getConfigValue()'s type-erased pointer, not via the registration handle.
+template <typename T>
+T readValue(const char* name, T fallback) {
+    const auto reply = Config::mgr()->getConfigValue(name);
+    if (!reply.dataptr)
+        return fallback;
+    return *reinterpret_cast<const T*>(*reply.dataptr);
+}
+
+}
+
+void registerConfig() {
+    registerOne(makeShared<CIntValue>(N_FACES, "faces", D_FACES));
+    registerOne(makeShared<CIntValue>(N_DURATION, "duration_ms", D_DURATION));
+    registerOne(makeShared<CFloatValue>(N_FOV, "fov", D_FOV));
+    registerOne(makeShared<CFloatValue>(N_DRAG_ZOOM, "drag_zoom", D_DRAG_ZOOM));
+    registerOne(makeShared<CFloatValue>(N_DRAG_SENS, "drag_sensitivity", D_DRAG_SENS));
+    registerOne(makeShared<CColorValue>(N_BACKGROUND, "background", D_BACKGROUND));
+}
+
+// Reads the registered values, validates/clamps them (cube::validate), and reports any
+// clamp with a visible notification. g_cfg is only ever consulted at the start of a
+// session (startSession copies it by value into CubeState, and the session's own
+// geometry/background are computed/snapshotted once at that point too), so replacing it
+// here while a session is mid-animation cannot corrupt an in-flight frame.
+void loadConfig() {
+    cube::Config raw;
+    raw.faces           = (int)readValue<Config::INTEGER>(N_FACES, D_FACES);
+    raw.durationMs      = (int)readValue<Config::INTEGER>(N_DURATION, D_DURATION);
+    raw.fovDeg          = readValue<Config::FLOAT>(N_FOV, D_FOV);
+    raw.dragZoom        = readValue<Config::FLOAT>(N_DRAG_ZOOM, D_DRAG_ZOOM);
+    raw.dragSensitivity = readValue<Config::FLOAT>(N_DRAG_SENS, D_DRAG_SENS);
+
+    const cube::Clamped v = cube::validate(raw);
+    g_cfg                 = v.config;
+
+    if (v.facesClamped)
+        HyprlandAPI::addNotification(PHANDLE,
+            "[hypr-cube] faces clamped to " + std::to_string(g_cfg.faces) + " (legal range 3-16)",
+            CHyprColor{1.0, 0.8, 0.2, 1.0}, 5000);
+    if (v.fovClamped)
+        HyprlandAPI::addNotification(PHANDLE,
+            "[hypr-cube] fov clamped to " + std::to_string((int)g_cfg.fovDeg) + " (legal range 20-120)",
+            CHyprColor{1.0, 0.8, 0.2, 1.0}, 5000);
+    if (v.dragZoomClamped)
+        HyprlandAPI::addNotification(PHANDLE,
+            "[hypr-cube] drag_zoom clamped (legal range 0.2-1.0)",
+            CHyprColor{1.0, 0.8, 0.2, 1.0}, 5000);
+
+    // CColorValue stores Hyprland's AR32 int (see CHyprColor::getAsHex()): bits 24-31
+    // alpha, 16-23 red, 8-15 green, 0-7 blue.
+    const uint32_t bg = (uint32_t)readValue<Config::INTEGER>(N_BACKGROUND, D_BACKGROUND);
+    g_background[0]   = ((bg >> 16) & 0xFF) / 255.f;
+    g_background[1]   = ((bg >>  8) & 0xFF) / 255.f;
+    g_background[2]   = ( bg        & 0xFF) / 255.f;
+    g_background[3]   = ((bg >> 24) & 0xFF) / 255.f;
+}
 
 // The Lua-config build of Hyprland has no route from hyprctl/hl.dispatch to an
 // addDispatcherV2 dispatcher (confirmed by direct probing of the control socket), so
@@ -96,6 +189,10 @@ static void cubeDrag() {
 // the time this many have queued without the loop turning over, the oldest are certainly done.
 static std::vector<UP<SEventLoopDoLaterLock>> g_pendingLua;
 
+// Lives for the plugin's lifetime; reset in PLUGIN_EXIT so it cannot fire loadConfig()
+// into unloaded code.
+static CHyprSignalListener g_configListener;
+
 static void queueLuaHop(std::function<void()> fn) {
     if (g_pendingLua.size() >= 8)
         g_pendingLua.erase(g_pendingLua.begin());
@@ -139,6 +236,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         throw std::runtime_error("[hypr-cube] version mismatch");
     }
 
+    hypr::registerConfig();
+
     HyprlandAPI::addDispatcherV2(PHANDLE, "cube:workspace", [](std::string arg) -> SDispatchResult {
         hypr::cubeWorkspace(arg);
         return SDispatchResult{};
@@ -161,6 +260,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addLuaFunction(PHANDLE, "cube", "stop", luaCubeStop);
     HyprlandAPI::addLuaFunction(PHANDLE, "cube", "drag", luaCubeDrag);
 
+    g_configListener = Event::bus()->m_events.config.reloaded.listen([] { hypr::loadConfig(); });
+    hypr::loadConfig();
+
     HyprlandAPI::addNotification(PHANDLE, "[hypr-cube] loaded",
                                  CHyprColor{0.2, 1.0, 0.2, 1.0}, 3000);
 
@@ -172,6 +274,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
     // and unregister the drag grab's live listeners so an unload mid-drag can't leave
     // Hyprland holding callbacks into memory this .so is about to lose.
     g_pendingLua.clear();
+    g_configListener.reset();
     hypr::endDragGrab();
     hypr::endSession();
 }
