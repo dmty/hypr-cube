@@ -118,9 +118,13 @@ void CubeRenderer::draw(std::vector<Quad> quads, const float bg[4],
     glActiveTexture(GL_TEXTURE0);
     int prevTexBinding = 0;
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevTexBinding);
+    // A link that optimized an attribute away leaves its location at -1; querying or
+    // enabling/disabling that is GL_INVALID_VALUE every frame and corrupts the restore below.
     int prevPosEnabled = 0, prevUvEnabled = 0;
-    glGetVertexAttribiv(m_aPos, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &prevPosEnabled);
-    glGetVertexAttribiv(m_aUv, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &prevUvEnabled);
+    if (m_aPos >= 0)
+        glGetVertexAttribiv(m_aPos, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &prevPosEnabled);
+    if (m_aUv >= 0)
+        glGetVertexAttribiv(m_aUv, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &prevUvEnabled);
 
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_DEPTH_TEST);        // convex prism: painter's algorithm suffices
@@ -136,11 +140,15 @@ void CubeRenderer::draw(std::vector<Quad> quads, const float bg[4],
     glUseProgram(m_program);
     glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
 
-    glEnableVertexAttribArray(m_aPos);
-    glEnableVertexAttribArray(m_aUv);
-    glVertexAttribPointer(m_aPos, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
-    glVertexAttribPointer(m_aUv,  2, GL_FLOAT, GL_FALSE, 5 * sizeof(float),
-                          (void*)(3 * sizeof(float)));
+    if (m_aPos >= 0) {
+        glEnableVertexAttribArray(m_aPos);
+        glVertexAttribPointer(m_aPos, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    }
+    if (m_aUv >= 0) {
+        glEnableVertexAttribArray(m_aUv);
+        glVertexAttribPointer(m_aUv, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float),
+                              (void*)(3 * sizeof(float)));
+    }
 
     glUniform1i(m_uTex, 0); // texture unit 0, activated above while saving its prior binding
 
@@ -151,8 +159,8 @@ void CubeRenderer::draw(std::vector<Quad> quads, const float bg[4],
         glDrawArrays(GL_TRIANGLES, 0, 6);
     }
 
-    if (prevPosEnabled) glEnableVertexAttribArray(m_aPos); else glDisableVertexAttribArray(m_aPos);
-    if (prevUvEnabled)  glEnableVertexAttribArray(m_aUv);  else glDisableVertexAttribArray(m_aUv);
+    if (m_aPos >= 0) { if (prevPosEnabled) glEnableVertexAttribArray(m_aPos); else glDisableVertexAttribArray(m_aPos); }
+    if (m_aUv >= 0)  { if (prevUvEnabled)  glEnableVertexAttribArray(m_aUv);  else glDisableVertexAttribArray(m_aUv); }
     glBindTexture(GL_TEXTURE_2D, prevTexBinding);
     glActiveTexture(prevActiveTexture);
 

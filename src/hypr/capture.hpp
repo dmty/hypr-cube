@@ -12,6 +12,10 @@ struct FaceTexture {
     bool                     valid() const { return tex != nullptr; }
 };
 
-FaceTexture captureWorkspace(PHLMONITOR mon, int workspaceId);
+// sync=false skips the trailing glFinish(): a caller capturing several faces in a row can
+// pass false for all but call finishCaptureSync() once after the loop instead, collapsing
+// N pipeline stalls into one.
+FaceTexture captureWorkspace(PHLMONITOR mon, int workspaceId, bool sync = true);
+void        finishCaptureSync();
 
 }

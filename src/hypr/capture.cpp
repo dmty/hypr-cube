@@ -27,7 +27,7 @@ template struct Steal<RenderWorkspaceTag, &Render::IHyprRenderer::renderWorkspac
 
 }
 
-FaceTexture captureWorkspace(PHLMONITOR mon, int workspaceId) {
+FaceTexture captureWorkspace(PHLMONITOR mon, int workspaceId, bool sync) {
     FaceTexture out;
     out.workspaceId = workspaceId;
 
@@ -100,7 +100,11 @@ FaceTexture captureWorkspace(PHLMONITOR mon, int workspaceId) {
     // This VM's GPU path is guest GL -> virgl -> host ANGLE -> Metal; without a hard sync
     // here, the capture's draw commands are not guaranteed complete before the texture is
     // sampled from a later, separate render pass, and the result was empirically blank.
-    glFinish();
+    // A multi-face caller can defer this (sync=false) and call finishCaptureSync() once
+    // after the whole batch instead: glFinish() blocks on everything queued so far, so one
+    // call after N captures still covers all N.
+    if (sync)
+        glFinish();
 
     g_pHyprRenderer->m_bRenderingSnapshot = false;
     mon->m_activeWorkspace                = savedWorkspace;
@@ -118,6 +122,10 @@ FaceTexture captureWorkspace(PHLMONITOR mon, int workspaceId) {
 
     out.tex = out.fb->getTexture();
     return out;
+}
+
+void finishCaptureSync() {
+    glFinish();
 }
 
 }

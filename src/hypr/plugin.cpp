@@ -18,6 +18,7 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <mutex>
 #include <stdexcept>
 #include <vector>
 
@@ -188,6 +189,10 @@ static void cubeDrag() {
 // already run, so entries are pruned by a size cap rather than by checking completion: by
 // the time this many have queued without the loop turning over, the oldest are certainly done.
 static std::vector<UP<SEventLoopDoLaterLock>> g_pendingLua;
+// Guards g_pendingLua: hyprctl eval/repl services each connection on its own std::thread,
+// so two concurrent Lua entry points (or one racing PLUGIN_EXIT's clear()) touch the vector
+// from different threads with no other synchronization.
+static std::mutex                              g_pendingLuaMutex;
 
 // Lives for the plugin's lifetime; reset in PLUGIN_EXIT so it cannot fire loadConfig()
 // into unloaded code.
@@ -206,6 +211,7 @@ static void endSessionIfOwnsMonitor(PHLMONITOR mon) {
 }
 
 static void queueLuaHop(std::function<void()> fn) {
+    std::lock_guard<std::mutex> lock(g_pendingLuaMutex);
     if (g_pendingLua.size() >= 8)
         g_pendingLua.erase(g_pendingLua.begin());
     g_pendingLua.push_back(g_pEventLoopManager->doLaterLock(std::move(fn)));
@@ -288,7 +294,10 @@ APICALL EXPORT void PLUGIN_EXIT() {
     // Drop any doLater hop queued by a Lua entry point before it can fire into freed code,
     // and unregister the drag grab's live listeners so an unload mid-drag can't leave
     // Hyprland holding callbacks into memory this .so is about to lose.
-    g_pendingLua.clear();
+    {
+        std::lock_guard<std::mutex> lock(g_pendingLuaMutex);
+        g_pendingLua.clear();
+    }
     g_configListener.reset();
     g_monitorRemovedListener.reset();
     g_monitorDestroyedListener.reset();

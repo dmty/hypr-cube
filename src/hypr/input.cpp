@@ -36,11 +36,19 @@ void beginDragGrab() {
     g_listeners.button = Event::bus()->m_events.input.mouse.button.listen(
         [](IPointer::SButtonEvent e, Event::SCallbackInfo& info) {
             if (!g_session) return;
-            info.cancelled = true;
             if (e.state == WL_POINTER_BUTTON_STATE_RELEASED) {
+                // Don't cancel this one: CInputManager::onMouseButton only pops
+                // m_currentlyHeldButtons when the event reaches it uncancelled, so cancelling
+                // the release (but not the press that started the drag) left the button
+                // permanently marked held in the compositor's own bookkeeping. The keybind
+                // manager already keeps this release from reaching the focused client on its
+                // own (it matches releases to the press that triggered the bind by button
+                // name), so nothing needs cancelling here for that.
                 g_session->state.release(nowMs());
                 endDragGrab();
+                return;
             }
+            info.cancelled = true;
         });
 
     g_listeners.key = Event::bus()->m_events.input.keyboard.key.listen(

@@ -52,23 +52,37 @@ static void flushPendingCommit() {
     g_pendingFace   = -1;
 
     if (face >= 0) {
-        const auto mon   = Desktop::focusState()->monitor();
-        const auto oldWs = mon ? mon->m_activeWorkspace : nullptr;
+        // The session's own monitor is authoritative, not whatever is focused right now: the
+        // keybind path installs no input grab, so focus-follows-mouse (or a window mapping
+        // elsewhere) can move focus to a different monitor during the 300ms rotation.
+        // Config::Actions::changeWorkspace() resolves relative to the focused monitor
+        // internally, so committing while focus has drifted would yank the target workspace
+        // onto the wrong monitor (spec S9). If focus no longer matches, skip the switch
+        // rather than risk that, but still report it and still tear the session down below.
+        const auto mon = g_session->monitor;
+        if (Desktop::focusState()->monitor() != mon) {
+            reportIfFailed("workspace switch failed",
+                           Config::Actions::actionError(
+                               "focus moved off the cube's monitor mid-rotation; workspace switch skipped",
+                               Config::Actions::eActionErrorLevel::WARNING, Config::Actions::eActionErrorCode::INVALID_STATE));
+        } else {
+            const auto oldWs = mon->m_activeWorkspace;
 
-        const auto res = Config::Actions::changeWorkspace(std::to_string(cube::workspaceOfFace(face)));
-        reportIfFailed("workspace switch failed", res);
+            const auto res = Config::Actions::changeWorkspace(std::to_string(cube::workspaceOfFace(face)));
+            reportIfFailed("workspace switch failed", res);
 
-        // changeWorkspace() just started Hyprland's own slide/fade on both workspaces
-        // (CMonitor::changeWorkspace -> Animation::Workspace::startAnimation); the cube already
-        // played that transition, so finish it on the spot rather than let it play again.
-        if (res && mon) {
-            if (oldWs) {
-                oldWs->m_renderOffset->warp();
-                oldWs->m_alpha->warp();
-            }
-            if (const auto newWs = mon->m_activeWorkspace) {
-                newWs->m_renderOffset->warp();
-                newWs->m_alpha->warp();
+            // changeWorkspace() just started Hyprland's own slide/fade on both workspaces
+            // (CMonitor::changeWorkspace -> Animation::Workspace::startAnimation); the cube already
+            // played that transition, so finish it on the spot rather than let it play again.
+            if (res) {
+                if (oldWs) {
+                    oldWs->m_renderOffset->warp();
+                    oldWs->m_alpha->warp();
+                }
+                if (const auto newWs = mon->m_activeWorkspace) {
+                    newWs->m_renderOffset->warp();
+                    newWs->m_alpha->warp();
+                }
             }
         }
     }
@@ -82,8 +96,14 @@ std::vector<UP<IPassElement>> CubePassElement::draw() {
     auto& s = *g_session;
 
     if (!g_rendererReady) {
-        if (g_rendererFailed)
+        if (g_rendererFailed) {
+            // A GL init failure is permanent for the plugin's lifetime (see g_rendererFailed's
+            // comment), so this session can never render; end it now instead of leaving
+            // s.state stuck "active" forever with no draw() ever reaching the check below.
+            // face -1: the renderer never produced anything to commit to.
+            endSessionDeferred(-1);
             return {};
+        }
         g_rendererReady = g_renderer.init();
         if (!g_rendererReady) {
             g_rendererFailed = true;
@@ -135,8 +155,11 @@ void startSession(PHLMONITOR mon, const cube::Config& cfg, int fromFace, bool ca
 
     std::vector<FaceTexture> faces(cfg.faces);
     if (captureAll) {
+        // One glFinish() after the batch instead of one per face (drag start otherwise
+        // stalls the pipeline 4-16 times in a row).
         for (int i = 0; i < cfg.faces; ++i)
-            faces[i] = captureWorkspace(mon, cube::workspaceOfFace(i));
+            faces[i] = captureWorkspace(mon, cube::workspaceOfFace(i), /*sync=*/false);
+        finishCaptureSync();
     } else {
         faces[fromFace] = captureWorkspace(mon, cube::workspaceOfFace(fromFace));
     }
@@ -166,8 +189,9 @@ void startSession(PHLMONITOR mon, const cube::Config& cfg, int fromFace, bool ca
             return;
         }
 
-        // Only ever touches g_pendingEnd/g_pendingFace/g_pendingTeardown, never g_session, so
-        // the check above still holds afterward; no need to repeat it.
+        // Only ever mutates g_pendingEnd/g_pendingFace/g_pendingTeardown (it reads g_session's
+        // monitor but never reassigns g_session itself), so the check above still holds
+        // afterward; no need to repeat it.
         flushPendingCommit();
 
         g_pHyprRenderer->m_renderPass.add(makeUnique<CubePassElement>());
