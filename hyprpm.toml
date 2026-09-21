@@ -2,7 +2,7 @@
 name = "hypr-cube"
 authors = ["dmitry"]
 commit_pins = [
-    ["efb50993780079460b0cbed1363e2166a2de1d9f", "ee9bd10740368ea12e184e840e1f4c233bcff3ed"],
+    ["efb50993780079460b0cbed1363e2166a2de1d9f", "c4ba2ec"],
 ]
 
 [hypr-cube]
