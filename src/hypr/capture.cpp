@@ -34,11 +34,14 @@ FaceTexture captureWorkspace(PHLMONITOR mon, int workspaceId, bool sync) {
     if (!mon)
         return out;
 
-    const auto ws = State::workspaceState()->query().id(workspaceId).run();
-    if (!ws)
-        return out; // does not exist yet: caller draws background
-    if (ws->m_monitor != mon)
-        return out; // lives on another monitor: same treatment
+    // A workspace that does not exist yet, or that lives on another monitor, is captured as
+    // a null workspace rather than skipped: renderAllClientsForWorkspace has an explicit
+    // null branch that draws the background and every layer surface but no windows, which
+    // is exactly what an empty desktop looks like. Skipping instead left a hole in the cube
+    // through which the inside of the far faces was visible.
+    auto ws = State::workspaceState()->query().id(workspaceId).run();
+    if (ws && ws->m_monitor != mon)
+        ws.reset();
 
     const CBox monbox = {0.0, 0.0, mon->m_pixelSize.x, mon->m_pixelSize.y};
 
@@ -51,12 +54,12 @@ FaceTexture captureWorkspace(PHLMONITOR mon, int workspaceId, bool sync) {
     const auto     savedWorkspace   = mon->m_activeWorkspace;
     const auto     savedSpecial     = mon->m_activeSpecialWorkspace;
     const bool     savedFeedback    = g_pHyprRenderer->m_bBlockSurfaceFeedback;
-    const bool     savedVisible     = ws->m_visible;
-    const bool     savedForceRend   = ws->m_forceRendering;
-    const float    savedAlphaVal    = ws->m_alpha->value();
-    const float    savedAlphaGoal   = ws->m_alpha->goal();
-    const Vector2D savedOffsetVal   = ws->m_renderOffset->value();
-    const Vector2D savedOffsetGoal  = ws->m_renderOffset->goal();
+    const bool     savedVisible     = ws ? ws->m_visible : false;
+    const bool     savedForceRend   = ws ? ws->m_forceRendering : false;
+    const float    savedAlphaVal    = ws ? ws->m_alpha->value() : 0.F;
+    const float    savedAlphaGoal   = ws ? ws->m_alpha->goal() : 0.F;
+    const Vector2D savedOffsetVal   = ws ? ws->m_renderOffset->value() : Vector2D{};
+    const Vector2D savedOffsetGoal  = ws ? ws->m_renderOffset->goal() : Vector2D{};
     CRegion        fakeDamage{0, 0, INT16_MAX, INT16_MAX};
 
     // shouldRenderWindow's visibility gate is keyed on CWorkspace::isVisible() (== m_visible),
@@ -89,10 +92,12 @@ FaceTexture captureWorkspace(PHLMONITOR mon, int workspaceId, bool sync) {
     // (m_renderOffset) since it isn't the active workspace being slid to; without zeroing
     // that too, its windows render fully opaque but entirely off the edge of the capture.
     mon->m_activeWorkspace = ws;
-    ws->m_visible          = true;
-    ws->m_forceRendering   = true;
-    ws->m_alpha->setValueAndWarp(1.F);
-    ws->m_renderOffset->setValueAndWarp(Vector2D{0, 0});
+    if (ws) {
+        ws->m_visible        = true;
+        ws->m_forceRendering = true;
+        ws->m_alpha->setValueAndWarp(1.F);
+        ws->m_renderOffset->setValueAndWarp(Vector2D{0, 0});
+    }
     (g_pHyprRenderer.get()->*stolen(RenderWorkspaceTag{}))(mon, ws, Time::steadyNow(), monbox);
     g_pHyprRenderer->m_renderData.blockScreenShader = true;
     g_pHyprRenderer->endRender();
@@ -108,12 +113,14 @@ FaceTexture captureWorkspace(PHLMONITOR mon, int workspaceId, bool sync) {
 
     g_pHyprRenderer->m_bRenderingSnapshot = false;
     mon->m_activeWorkspace                = savedWorkspace;
-    ws->m_visible                         = savedVisible;
-    ws->m_forceRendering                  = savedForceRend;
-    ws->m_alpha->setValueAndWarp(savedAlphaVal);
-    *ws->m_alpha                              = savedAlphaGoal;
-    ws->m_renderOffset->setValueAndWarp(savedOffsetVal);
-    *ws->m_renderOffset                       = savedOffsetGoal;
+    if (ws) {
+        ws->m_visible        = savedVisible;
+        ws->m_forceRendering = savedForceRend;
+        ws->m_alpha->setValueAndWarp(savedAlphaVal);
+        *ws->m_alpha = savedAlphaGoal;
+        ws->m_renderOffset->setValueAndWarp(savedOffsetVal);
+        *ws->m_renderOffset = savedOffsetGoal;
+    }
     g_pHyprRenderer->m_bBlockSurfaceFeedback = savedFeedback;
     if (sourceHadVisible)
         savedWorkspace->m_visible = true;

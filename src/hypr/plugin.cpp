@@ -140,10 +140,10 @@ static void cubeWorkspace(const std::string& arg) {
         return;
     }
 
-    startSession(mon, g_cfg, face, /*captureAll=*/false);
-    const int dest = cube::normalizeFace(face + dir, g_cfg.faces);
-    g_session->faces[dest] = captureWorkspace(mon, cube::workspaceOfFace(dest));
-
+    // Captures every face, not just the two the turn moves between: at any angle between
+    // them the front pair does not cover the viewport, and the faces behind are visible
+    // through the gap. Capturing only two left that gap empty.
+    startSession(mon, g_cfg);
     g_session->state.startRotate(face, dir, nowMs());
 }
 
@@ -165,7 +165,7 @@ static void cubeDrag() {
     if (face < 0)
         return; // not on a cube face: nothing to spin
 
-    startSession(mon, g_cfg, face, /*captureAll=*/true);
+    startSession(mon, g_cfg);
     g_session->state.startDrag(face, nowMs());
     beginDragGrab();
 }

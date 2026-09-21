@@ -113,6 +113,9 @@ bindm = SUPER ALT, mouse:272, cube:drag
 ## Known limitations
 
 - Faces are **snapshots** taken at the start of a turn, not a live view. A video playing on
-  a background face freezes for the duration of the turn.
+  a background face freezes for the duration of the turn. Every face is captured, so a turn
+  costs `faces` off-screen workspace renders regardless of how far the cube travels.
+- A face whose workspace does not exist yet shows the bare desktop — wallpaper and layer
+  surfaces, no windows.
 - The mouse cursor stays visible over the cube while dragging; it is not hidden or
   replaced with a grab cursor.

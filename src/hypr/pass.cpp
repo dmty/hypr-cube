@@ -148,21 +148,17 @@ std::vector<UP<IPassElement>> CubePassElement::draw() {
     return {};
 }
 
-void startSession(PHLMONITOR mon, const cube::Config& cfg, int fromFace, bool captureAll) {
+void startSession(PHLMONITOR mon, const cube::Config& cfg) {
     const float fovYRad = cfg.fovDeg * (float)M_PI / 180.f;
     const cube::Geometry geometry =
         cube::makeGeometry(cfg.faces, (float)mon->m_pixelSize.x, (float)mon->m_pixelSize.y, fovYRad);
 
+    // One glFinish() after the batch instead of one per face (session start otherwise
+    // stalls the pipeline 4-16 times in a row).
     std::vector<FaceTexture> faces(cfg.faces);
-    if (captureAll) {
-        // One glFinish() after the batch instead of one per face (drag start otherwise
-        // stalls the pipeline 4-16 times in a row).
-        for (int i = 0; i < cfg.faces; ++i)
-            faces[i] = captureWorkspace(mon, cube::workspaceOfFace(i), /*sync=*/false);
-        finishCaptureSync();
-    } else {
-        faces[fromFace] = captureWorkspace(mon, cube::workspaceOfFace(fromFace));
-    }
+    for (int i = 0; i < cfg.faces; ++i)
+        faces[i] = captureWorkspace(mon, cube::workspaceOfFace(i), /*sync=*/false);
+    finishCaptureSync();
 
     g_session.emplace(CubeSession{mon, cube::CubeState{cfg}, geometry, std::move(faces), {}});
     for (int i = 0; i < 4; ++i)

@@ -39,7 +39,7 @@ double nowMs();
 // Notifies on a failed Config::Actions call; shared by every workspace-switch site.
 void reportIfFailed(const char* what, const Config::Actions::ActionResult& res);
 
-void startSession(PHLMONITOR mon, const cube::Config& cfg, int fromFace, bool captureAll);
+void startSession(PHLMONITOR mon, const cube::Config& cfg);
 void endSession();
 // Records the face to commit (or -1 to just end without switching); the actual
 // workspace switch and session teardown happen on the next event-loop turn.
