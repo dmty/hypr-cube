@@ -4,6 +4,8 @@
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
+#include <hyprland/src/desktop/state/FocusState.hpp>
+#include <hyprland/src/desktop/Workspace.hpp>
 #include <chrono>
 #include <cmath>
 
@@ -19,10 +21,17 @@ static bool                g_rendererReady = false;
 // Try exactly once per plugin load.
 static bool                g_rendererFailed = false;
 
-// Set from draw() when the animation finishes; the actual commit/teardown is applied
-// from flushPendingCommit() on the next render.stage callback, never from inside draw().
+// Set from draw() when the animation finishes. The commit itself happens in
+// flushPendingCommit() on the next render.stage callback, never from inside draw();
+// teardown happens one callback later still, via g_pendingTeardown below.
 static bool g_pendingEnd  = false;
 static int  g_pendingFace = -1;
+// Set once the commit lands. By RENDER_LAST_MOMENT the frame's window content is already
+// rendered against whatever workspace was active a moment ago, so ending the session on the
+// same frame the workspace changes would show that stale content for one frame. Keep the
+// cube (pixel-identical to the stock resting frame, so drawing it once more is invisible)
+// for that one frame and tear down on the next stage callback instead.
+static bool g_pendingTeardown = false;
 
 double nowMs() {
     return std::chrono::duration<double, std::milli>(Time::steadyNow().time_since_epoch()).count();
@@ -42,10 +51,29 @@ static void flushPendingCommit() {
     g_pendingEnd    = false;
     g_pendingFace   = -1;
 
-    if (face >= 0)
-        reportIfFailed("workspace switch failed",
-                       Config::Actions::changeWorkspace(std::to_string(cube::workspaceOfFace(face))));
-    endSession();
+    if (face >= 0) {
+        const auto mon   = Desktop::focusState()->monitor();
+        const auto oldWs = mon ? mon->m_activeWorkspace : nullptr;
+
+        const auto res = Config::Actions::changeWorkspace(std::to_string(cube::workspaceOfFace(face)));
+        reportIfFailed("workspace switch failed", res);
+
+        // changeWorkspace() just started Hyprland's own slide/fade on both workspaces
+        // (CMonitor::changeWorkspace -> Animation::Workspace::startAnimation); the cube already
+        // played that transition, so finish it on the spot rather than let it play again.
+        if (res && mon) {
+            if (oldWs) {
+                oldWs->m_renderOffset->warp();
+                oldWs->m_alpha->warp();
+            }
+            if (const auto newWs = mon->m_activeWorkspace) {
+                newWs->m_renderOffset->warp();
+                newWs->m_alpha->warp();
+            }
+        }
+    }
+    // Stay alive through this frame; the following stage callback tears down for real.
+    g_pendingTeardown = true;
 }
 
 std::vector<UP<IPassElement>> CubePassElement::draw() {
@@ -120,6 +148,12 @@ void startSession(PHLMONITOR mon, const cube::Config& cfg, int fromFace, bool ca
     g_stageListener = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) {
         if (stage != RENDER_LAST_MOMENT)
             return;
+
+        if (g_pendingTeardown) {
+            endSession();
+            return;
+        }
+
         flushPendingCommit();
         if (!g_session)
             return;
@@ -137,9 +171,12 @@ void endSession() {
     g_session.reset();
     // Direct callers (cubeStop, PLUGIN_EXIT) bypass flushPendingCommit's own reset of these;
     // without clearing them here, a commit left pending from the session just torn down would
-    // fire on the very first frame of the next session and kill it immediately.
-    g_pendingEnd  = false;
-    g_pendingFace = -1;
+    // fire on the very first frame of the next session and kill it immediately. Same reasoning
+    // for g_pendingTeardown: a direct call here (e.g. unload landing between the commit frame
+    // and its teardown frame) must not leave it set for the next session to trip over.
+    g_pendingEnd      = false;
+    g_pendingFace     = -1;
+    g_pendingTeardown = false;
 }
 
 void endSessionDeferred(int face) {
