@@ -294,4 +294,8 @@ APICALL EXPORT void PLUGIN_EXIT() {
     g_monitorDestroyedListener.reset();
     hypr::endDragGrab();
     hypr::endSession();
+    // endSession() already does this, but a dangling pass element after unload crashes the
+    // compositor and this call costs nothing, so it is repeated here as a last line of defense
+    // against any future path that ends a session without going through endSession().
+    g_pHyprRenderer->m_renderPass.removeAllOfType("CubePassElement");
 }
