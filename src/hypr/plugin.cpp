@@ -193,6 +193,18 @@ static std::vector<UP<SEventLoopDoLaterLock>> g_pendingLua;
 // into unloaded code.
 static CHyprSignalListener g_configListener;
 
+// `removed` (disconnected/disabled) and `destroyMon` (hard removed) are separate signals;
+// a session holding that monitor wants to end either way, so both are guarded the same.
+static CHyprSignalListener g_monitorRemovedListener;
+static CHyprSignalListener g_monitorDestroyedListener;
+
+static void endSessionIfOwnsMonitor(PHLMONITOR mon) {
+    if (hypr::g_session && hypr::g_session->monitor == mon) {
+        hypr::endDragGrab();
+        hypr::endSession();
+    }
+}
+
 static void queueLuaHop(std::function<void()> fn) {
     if (g_pendingLua.size() >= 8)
         g_pendingLua.erase(g_pendingLua.begin());
@@ -263,6 +275,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_configListener = Event::bus()->m_events.config.reloaded.listen([] { hypr::loadConfig(); });
     hypr::loadConfig();
 
+    g_monitorRemovedListener   = Event::bus()->m_events.monitor.removed.listen(endSessionIfOwnsMonitor);
+    g_monitorDestroyedListener = Event::bus()->m_events.monitor.destroyMon.listen(endSessionIfOwnsMonitor);
+
     HyprlandAPI::addNotification(PHANDLE, "[hypr-cube] loaded",
                                  CHyprColor{0.2, 1.0, 0.2, 1.0}, 3000);
 
@@ -275,6 +290,8 @@ APICALL EXPORT void PLUGIN_EXIT() {
     // Hyprland holding callbacks into memory this .so is about to lose.
     g_pendingLua.clear();
     g_configListener.reset();
+    g_monitorRemovedListener.reset();
+    g_monitorDestroyedListener.reset();
     hypr::endDragGrab();
     hypr::endSession();
 }

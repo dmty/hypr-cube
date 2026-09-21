@@ -149,14 +149,27 @@ void startSession(PHLMONITOR mon, const cube::Config& cfg, int fromFace, bool ca
         if (stage != RENDER_LAST_MOMENT)
             return;
 
+        // Every monitor fires this stage callback on its own render cycle, but g_pendingEnd/
+        // g_pendingFace/g_pendingTeardown below are session-global state: a foreign monitor's
+        // frame must never read or mutate them, or it can steal the session's one-frame commit
+        // and teardown sequencing (racing the session's own monitor for who sees pendingTeardown
+        // first). So the identity check comes before any of that, not after.
+        // Render::SRenderData::pMonitor names the monitor currently being rendered; it is a weak
+        // PHLMONITORREF against g_session->monitor's shared PHLMONITOR. CWeakPointer defines
+        // operator== against a CSharedPointer but operator!= only against nullptr_t, so negate
+        // the equality explicitly rather than reaching for !=.
+        if (!g_session || !(g_pHyprRenderer->m_renderData.pMonitor == g_session->monitor))
+            return;
+
         if (g_pendingTeardown) {
             endSession();
             return;
         }
 
+        // Only ever touches g_pendingEnd/g_pendingFace/g_pendingTeardown, never g_session, so
+        // the check above still holds afterward; no need to repeat it.
         flushPendingCommit();
-        if (!g_session)
-            return;
+
         g_pHyprRenderer->m_renderPass.add(makeUnique<CubePassElement>());
     });
 }
